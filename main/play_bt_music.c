@@ -27,10 +27,24 @@
 #include "bluetooth_service.h"
 #include "equalizer.h"
 
-static const char *TAG = "Jose's car speaker";
+static const char *TAG = "play_bt_music";
 
-esp_periph_handle_t led_handle = NULL;
-void start_blink()
+
+#define FALSE 0
+#define TRUE 1 
+
+#define ENABLE_EQUALIZER FALSE
+
+int equalizer_presets [6] [20] = {
+    { -13, -13, -13, -13, -13, -13, -13, -13, -13, -13, -13, -13, -13, -13, -13, -13, -13, -13, -13, -13}, // Default
+    { -1.6, 4.5, 7, 8, 5.6, 0, -2.5, -2, -1.6, -1.5, -1.6, 4.5, 7, 8, 5.6, 0, -2.5, -2, -1.6, -1.5 }, // Pop
+    { 5, 1.5, 0, -2.5, 0, 4, 8, 9, 11, 12, 5, 1.5, 0, -2.5, 0, 4, 8, 9, 11, 12  }, // Soft
+    { 8, 5, -5.5, -8, -3, 4, 8, 11, 11, 11.5, 8, 5, -5.5, -8, -3, 4, 8, 11, 11, 11.5 }, // Rock
+    { 9.6, 7, 2.5, 0, 0, -5.6, -7, -7, 0, 0, 9.6, 7, 2.5, 0, 0, -5.6, -7, -7, 0, 0}, // Dance
+    { 0, 0, 0, 0, 0, 0, -6 , -7, -7, -9.5, 0, 0, 0, 0, 0, 0, -6 , -7, -7, -9.5 } // Classical
+};
+
+void start_blink(esp_periph_handle_t led_handle)
 {
     if (led_handle) {
         periph_led_blink(led_handle, get_green_led_gpio(), 500, 500, true, -1, 0);
@@ -41,17 +55,46 @@ void start_blink()
 static audio_element_handle_t create_filter(int source_rate, int source_channel, int dest_rate, int dest_channel, int mode)
 {
     rsp_filter_cfg_t rsp_cfg = DEFAULT_RESAMPLE_FILTER_CONFIG();
-    //rsp_cfg.src_rate = source_rate;
-    //rsp_cfg.src_ch = source_channel;
+    rsp_cfg.src_rate = source_rate;
+    rsp_cfg.src_ch = source_channel;
     rsp_cfg.dest_rate = dest_rate;
     rsp_cfg.dest_ch = dest_channel;
     rsp_cfg.mode = mode;
-    rsp_cfg.complexity = 0;
     return rsp_filter_init(&rsp_cfg);
+}
+
+void updateEqualizer(audio_element_handle_t eq, equalizer_cfg_t cfg, int mode){
+
+    if (mode == 0) {
+        ESP_LOGI(TAG, "[ * ] [Mode] Normal Eq");
+        cfg.set_gain = equalizer_presets[mode];
+    } else if (mode == 1) {
+        ESP_LOGI(TAG, "[ * ] [Mode] Pop Eq");
+        cfg.set_gain = equalizer_presets[mode];;
+    } else if (mode == 2) {
+        ESP_LOGI(TAG, "[ * ] [Mode] Soft Eq");
+        cfg.set_gain = equalizer_presets[mode];;
+    } else if (mode == 3) {
+        ESP_LOGI(TAG, "[ * ] [Mode] Rock Eq");
+        cfg.set_gain = equalizer_presets[mode];
+    } else if (mode == 4) {
+        ESP_LOGI(TAG, "[ * ] [Mode] Dance Eq");
+        cfg.set_gain = equalizer_presets[mode];
+    }else if (mode == 5) {
+        ESP_LOGI(TAG, "[ * ] [Mode] Classic Eq");
+        cfg.set_gain = equalizer_presets[mode];
+    }
+    ESP_LOGI(TAG, "Set %d",cfg.set_gain[mode]);
+    
+    if (equalizer_set_info(eq, 44100, 2) != ESP_OK) {
+        ESP_LOGI(TAG, "equalizer_set_info error"); 
+    }
 }
 
 void app_main(void)
 {
+    esp_periph_handle_t led_handle = NULL;
+
     audio_pipeline_handle_t pipeline;
     audio_element_handle_t bt_stream_reader, i2s_stream_writer, equalizer;
 
@@ -88,74 +131,50 @@ void app_main(void)
 
     ESP_LOGI(TAG, "[3.2] Get Bluetooth stream");
     bt_stream_reader = bluetooth_service_create_stream();
-/*
-    equalizer_cfg_t eq_cfg = DEFAULT_EQUALIZER_CONFIG();
-    //int set_gain[] = { -13, -13, -13, -13, -13, -13, -13, -13, -13, -13, -13, -13, -13, -13, -13, -13, -13, -13, -13, -13};
-    int set_gain[] = { 0,0,0,0,0 ,0,0,0, 0,0, 0,0,0,0,0 ,0,0,0,0,0};
-    //                LEFT SPEAKER                     ,                   RIGHT SPEAKER
-    eq_cfg.channel = 2;
-    eq_cfg.set_gain =
-        set_gain; // The size of gain array should be the multiplication of NUMBER_BAND and number channels of audio stream data. The minimum of gain is -13 dB.
-    equalizer = equalizer_init(&eq_cfg);*/
 
-    ESP_LOGI(TAG, "[3.2] Register all elements to audio pipeline");
 
-    //audio_element_handle_t filter_upsample_el = create_filter(NULL, NULL, PLAYBACK_RATE, PLAYBACK_CHANNEL, RESAMPLE_DECODE_MODE);
+    #if ENABLE_EQUALIZER == TRUE
+        ESP_LOGI(TAG, "[3.2.1] Create equalizer step");
+        equalizer_cfg_t equalizer_cfg = DEFAULT_EQUALIZER_CONFIG();
+        equalizer_cfg.set_gain = equalizer_presets[1];
+        equalizer = equalizer_init(&equalizer_cfg);
+    #endif
+    
 
+    ESP_LOGI(TAG, "[3.2.2] Add resampling to audio pipeline");
+    audio_element_handle_t filter = create_filter(44100, 2, 96000, 2, RESAMPLE_DECODE_MODE);
+
+    ESP_LOGI(TAG, "[3.3] Register all elements to audio pipeline");
 
     audio_pipeline_register(pipeline, bt_stream_reader, "bt");
-    //audio_pipeline_register(pipeline, filter_upsample_el, "filter_upsample");
-    //audio_pipeline_register(pipeline, equalizer, "equalizer");
+    #if ENABLE_EQUALIZER == TRUE
+        audio_pipeline_register(pipeline, equalizer, "equalizer");
+    #endif
+    audio_pipeline_register(pipeline, filter, "filter");
     audio_pipeline_register(pipeline, i2s_stream_writer, "i2s");
 
-    audio_hal_set_volume(board_handle->audio_hal, 90);
-
-    ESP_LOGI(TAG, "[3.3] Link it together [Bluetooth]-->bt_stream_reader-->i2s_stream_writer-->[codec_chip]");
-
-#if (CONFIG_ESP_LYRATD_MSC_V2_1_BOARD || CONFIG_ESP_LYRATD_MSC_V2_2_BOARD)
-    rsp_filter_cfg_t rsp_cfg = DEFAULT_RESAMPLE_FILTER_CONFIG();
-    rsp_cfg.src_rate = 44100;
-    rsp_cfg.src_ch = 2;
-    rsp_cfg.dest_rate = 48000;
-    rsp_cfg.dest_ch = 2;
-    audio_element_handle_t filter = rsp_filter_init(&rsp_cfg);
-    audio_pipeline_register(pipeline, filter, "filter");
-    i2s_stream_set_clk(i2s_stream_writer, 48000, 16, 2);
-    const char *link_tag[3] = {"bt", "filter", "i2s"};
-    audio_pipeline_link(pipeline, &link_tag[0], 3);
-#else
-    //const char *link_tag[3] = {"bt", "equalizer", "i2s"};
-    //audio_pipeline_link(pipeline, &link_tag[0], 3);
+    ESP_LOGI(TAG, "[3.3] Link it together [Bluetooth]-->bt_stream_reader-->filter-->i2s_stream_writer-->[codec_chip]");
     
-   
-    rsp_filter_cfg_t rsp_cfg = DEFAULT_RESAMPLE_FILTER_CONFIG();
-    rsp_cfg.src_rate = 44100;
-    rsp_cfg.src_ch = 2;
-    rsp_cfg.dest_rate = 96000;
-    rsp_cfg.dest_ch = 2;
-    audio_element_handle_t filter = rsp_filter_init(&rsp_cfg);
-    audio_pipeline_register(pipeline, filter, "filter");
     i2s_stream_set_clk(i2s_stream_writer, 96000, 16, 2);
 
-    //_cfg.samplerate = 96000;
-    
+    #if ENABLE_EQUALIZER == TRUE 
+        const char *link_tag[4] = {"bt", "equalizer", "filter", "i2s"};
+        audio_pipeline_link(pipeline, &link_tag[0], 4);
+    #else 
+        const char *link_tag[3] = {"bt", "filter", "i2s"};
+        audio_pipeline_link(pipeline, &link_tag[0], 3);
+    #endif
 
-    const char *link_tag[3] = {"bt", "filter", "i2s"};
-    audio_pipeline_link(pipeline, &link_tag[0], 3);
-#endif
     ESP_LOGI(TAG, "[ 4 ] Initialize peripherals");
+
     esp_periph_config_t periph_cfg = DEFAULT_ESP_PERIPH_SET_CONFIG();
     esp_periph_set_handle_t set = esp_periph_set_init(&periph_cfg);
 
-    //ESP_LOGI(TAG, "[ 2 ] Initialize IS31fl3216 peripheral");
-    //periph_is31fl3216_cfg_t is31fl3216_cfg = { 0 };
-    //is31fl3216_cfg.state = IS31FL3216_STATE_ON;
-    //esp_periph_handle_t is31fl3216_periph = periph_is31fl3216_init(&is31fl3216_cfg);
 
     ESP_LOGI(TAG, "[4.1] Initialize Touch peripheral");
     audio_board_key_init(set);
 
-    ESP_LOGI(TAG, "[ 4.1.1 ] Start peripherals");
+    ESP_LOGI(TAG, "[ 4.1.1 ] Start Led peripherals");
 
     periph_led_cfg_t led_cfg = {
         .led_speed_mode = LEDC_LOW_SPEED_MODE,
@@ -164,13 +183,7 @@ void app_main(void)
         .led_freq_hz = 5000,
     };
     led_handle = periph_led_init(&led_cfg);
-    
 
-    //esp_periph_start(set, is31fl3216_periph);
-
-    //periph_is31fl3216_set_duty(is31fl3216_periph, 0, 255);
-    //periph_is31fl3216_state_t led_state = IS31FL3216_STATE_ON;
-    //periph_is31fl3216_set_state(is31fl3216_periph, led_state);
 
     ESP_LOGI(TAG, "[4.2] Create Bluetooth peripheral");
     esp_periph_handle_t bt_periph = bluetooth_service_create_periph();
@@ -190,16 +203,12 @@ void app_main(void)
     audio_event_iface_set_listener(esp_periph_set_get_event_iface(set), evt);
 
     ESP_LOGI(TAG, "[ 6 ] Start audio_pipeline");
-    start_blink();
+    start_blink(led_handle);
     audio_pipeline_run(pipeline);
 
-    //audio_hal_set_volume(board_handle->audio_hal, 90);
+    audio_hal_set_volume(board_handle->audio_hal, 90);
 
     int mode = 0;
-
-    int player_volume;
-    audio_hal_get_volume(board_handle->audio_hal, &player_volume);
-    ESP_LOGI(TAG, "[ * ] Volume = %d", player_volume);
 
     ESP_LOGI(TAG, "[ 7 ] Listen for all pipeline events");
     while (1) {
@@ -212,20 +221,21 @@ void app_main(void)
 
         if (msg.source_type == AUDIO_ELEMENT_TYPE_ELEMENT && msg.source == (void *) bt_stream_reader
             && msg.cmd == AEL_MSG_CMD_REPORT_MUSIC_INFO) {
+            
             audio_element_info_t music_info = {0};
             audio_element_getinfo(bt_stream_reader, &music_info);
 
             ESP_LOGI(TAG, "[ * ] Receive music info from Bluetooth, sample_rates=%d, bits=%d, ch=%d",
                      music_info.sample_rates, music_info.bits, music_info.channels);
 
-            audio_element_setinfo(i2s_stream_writer, &music_info);
-#if (CONFIG_ESP_LYRATD_MSC_V2_1_BOARD || CONFIG_ESP_LYRATD_MSC_V2_2_BOARD)
-#else
-            /*if (equalizer_set_info(equalizer, music_info.sample_rates, music_info.channels) != ESP_OK) {
-               ESP_LOGI(TAG, "equalizer_set_info error"); 
-            }*/
-            //i2s_stream_set_clk(i2s_stream_writer, music_info.sample_rates, music_info.bits, music_info.channels);
-#endif
+            //audio_element_setinfo(i2s_stream_writer, &music_info);
+            #if ENABLE_EQUALIZER == TRUE
+                if (equalizer_set_info(equalizer, music_info.sample_rates, music_info.channels) != ESP_OK) {
+                    ESP_LOGI(TAG, "equalizer_set_info error"); 
+                }
+            #endif
+            //i2s_stream_set_clk(i2s_stream_writer, music_info.sample_rates, music_info.channels, 2);
+
             continue;
         }
 
@@ -241,37 +251,19 @@ void app_main(void)
             } else if ((int) msg.data == get_input_volup_id()) {
                 ESP_LOGI(TAG, "[ * ] [Vol+] touch tap event");
                 periph_bluetooth_next(bt_periph);
-                player_volume += 10;
-                if (player_volume > 100) {
-                    player_volume = 100;
-                }
-                // print volume
-                ESP_LOGI(TAG, "[ * ] Volume = %d", player_volume);
-                //audio_hal_set_volume(board_handle->audio_hal, player_volume);
             } else if ((int) msg.data == get_input_voldown_id()) {
                 ESP_LOGI(TAG, "[ * ] [Vol-] touch tap event");
-                player_volume -= 10;
-                if (player_volume < 0) {
-                    player_volume = 0;
-                }
-                //audio_hal_set_volume(board_handle->audio_hal, player_volume);
                 periph_bluetooth_prev(bt_periph);
             } else if ((int) msg.data == get_input_mode_id()){
                 ESP_LOGI(TAG, "[ * ] [Mode] tap event");
-                /*mode = mode + 1;
-                if (mode > 1) {
+
+                mode = mode + 1;
+                if (mode > 5) {
                     mode = 0;
                 }
-
-                if (mode == 0) {
-                    eq_cfg.set_gain = set_gain;
-                    ESP_LOGI(TAG, "[ * ] [Mode] Normal Eq");
-                } else {
-                    ESP_LOGI(TAG, "[ * ] [Mode] Pop Eq");
-                    int set_gain_pop[] = { -1.6, 4.5, 7, 8, 5.6, 0, -2.5, -2, -1.6, -1.5, -1.6, 4.5, 7, 8, 5.6, 0, -2.5, -2, -1.6, -1.5 };
-                    eq_cfg.set_gain = set_gain_pop;
-                }
-                */
+            #if ENABLE_EQUALIZER == TRUE
+                updateEqualizer(equalizer, equalizer_cfg, mode);
+            #endif
 
             }
         }
@@ -300,7 +292,11 @@ void app_main(void)
     audio_pipeline_terminate(pipeline);
 
     audio_pipeline_unregister(pipeline, bt_stream_reader);
-    //audio_pipeline_unregister(pipeline, equalizer);
+
+#if ENABLE_EQUALIZER == TRUE
+    audio_pipeline_unregister(pipeline, equalizer);
+#endif 
+    audio_pipeline_unregister(pipeline, filter);
     audio_pipeline_unregister(pipeline, i2s_stream_writer);
 
     /* Terminate the pipeline before removing the listener */
@@ -315,16 +311,15 @@ void app_main(void)
 
     /* Release all resources */
 
-#if (CONFIG_ESP_LYRATD_MSC_V2_1_BOARD || CONFIG_ESP_LYRATD_MSC_V2_2_BOARD)
-    audio_pipeline_unregister(pipeline, filter);
-    audio_element_deinit(filter);
-#endif
-    audio_pipeline_unregister(pipeline, filter);
-    audio_element_deinit(filter);
     audio_pipeline_deinit(pipeline);
     audio_element_deinit(bt_stream_reader);
-    //audio_element_deinit(equalizer);
+    
+#if ENABLE_EQUALIZER == TRUE
+    audio_element_deinit(equalizer);
+#endif
+    audio_element_deinit(filter);
     audio_element_deinit(i2s_stream_writer);
+
     esp_periph_set_destroy(set);
     bluetooth_service_destroy();
 }

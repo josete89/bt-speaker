@@ -1,6 +1,14 @@
 # bt-speaker
 
-The project plays music received by Bluetooth from any A2DP Bluetooth source. 
+The project plays music received by Bluetooth from any A2DP Bluetooth source.
+
+It will resample it to 96 kHZ and pass through an equalizer with the following modes:
+
+* Pop
+* Soft
+* Rock
+* Dance
+* Classic 
 
 ## Build
 
