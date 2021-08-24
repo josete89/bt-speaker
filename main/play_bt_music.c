@@ -33,10 +33,10 @@ static const char *TAG = "play_bt_music";
 #define FALSE 0
 #define TRUE 1 
 
-#define ENABLE_EQUALIZER FALSE
+#define ENABLE_EQUALIZER TRUE
 
 int equalizer_presets [6] [20] = {
-    { -13, -13, -13, -13, -13, -13, -13, -13, -13, -13, -13, -13, -13, -13, -13, -13, -13, -13, -13, -13}, // Default
+    { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 }, // Flat
     { -1.6, 4.5, 7, 8, 5.6, 0, -2.5, -2, -1.6, -1.5, -1.6, 4.5, 7, 8, 5.6, 0, -2.5, -2, -1.6, -1.5 }, // Pop
     { 5, 1.5, 0, -2.5, 0, 4, 8, 9, 11, 12, 5, 1.5, 0, -2.5, 0, 4, 8, 9, 11, 12  }, // Soft
     { 8, 5, -5.5, -8, -3, 4, 8, 11, 11, 11.5, 8, 5, -5.5, -8, -3, 4, 8, 11, 11, 11.5 }, // Rock
@@ -86,9 +86,15 @@ void updateEqualizer(audio_element_handle_t eq, equalizer_cfg_t cfg, int mode){
     }
     ESP_LOGI(TAG, "Set %d",cfg.set_gain[mode]);
     
-    if (equalizer_set_info(eq, 44100, 2) != ESP_OK) {
+    /*if (equalizer_set_info(eq, 48000, 2) != ESP_OK) {
         ESP_LOGI(TAG, "equalizer_set_info error"); 
+    }*/
+    int count = 9;
+    int i;
+    for (i = 0; i < count; i++){
+        equalizer_set_gain_info(eq,i,cfg.set_gain[i],true);
     }
+    
 }
 
 void app_main(void)
@@ -136,13 +142,13 @@ void app_main(void)
     #if ENABLE_EQUALIZER == TRUE
         ESP_LOGI(TAG, "[3.2.1] Create equalizer step");
         equalizer_cfg_t equalizer_cfg = DEFAULT_EQUALIZER_CONFIG();
-        equalizer_cfg.set_gain = equalizer_presets[1];
+        equalizer_cfg.set_gain = equalizer_presets[2];
         equalizer = equalizer_init(&equalizer_cfg);
     #endif
     
 
     ESP_LOGI(TAG, "[3.2.2] Add resampling to audio pipeline");
-    audio_element_handle_t filter = create_filter(44100, 2, 96000, 2, RESAMPLE_DECODE_MODE);
+    audio_element_handle_t filter = create_filter(44100, 2, 48000, 2, RESAMPLE_DECODE_MODE);
 
     ESP_LOGI(TAG, "[3.3] Register all elements to audio pipeline");
 
@@ -155,10 +161,10 @@ void app_main(void)
 
     ESP_LOGI(TAG, "[3.3] Link it together [Bluetooth]-->bt_stream_reader-->filter-->i2s_stream_writer-->[codec_chip]");
     
-    i2s_stream_set_clk(i2s_stream_writer, 96000, 16, 2);
+    i2s_stream_set_clk(i2s_stream_writer, 48000, 16, 2);
 
     #if ENABLE_EQUALIZER == TRUE 
-        const char *link_tag[4] = {"bt", "equalizer", "filter", "i2s"};
+        const char *link_tag[4] = {"bt","filter", "equalizer", "i2s"};
         audio_pipeline_link(pipeline, &link_tag[0], 4);
     #else 
         const char *link_tag[3] = {"bt", "filter", "i2s"};
@@ -230,7 +236,7 @@ void app_main(void)
 
             //audio_element_setinfo(i2s_stream_writer, &music_info);
             #if ENABLE_EQUALIZER == TRUE
-                if (equalizer_set_info(equalizer, music_info.sample_rates, music_info.channels) != ESP_OK) {
+                if (equalizer_set_info(equalizer, 48000, 2) != ESP_OK) {
                     ESP_LOGI(TAG, "equalizer_set_info error"); 
                 }
             #endif
